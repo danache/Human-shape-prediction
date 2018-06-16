@@ -1,7 +1,3 @@
-import cPickle as pickle
-import glob
-
-import matplotlib.pyplot as plt
 import ray
 import ray.tune as tune
 from pylab import *
@@ -81,17 +77,10 @@ class Trainer(Trainable):
         self.net.cuda()
         # optimizer setup
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.config["lr"], weight_decay=self.config["weight_decay"])
-        self.posesV0  = glob.glob('/media/sparky/Git/king/Documents/measurement/dataset/up-3d/*.pkl')
 
     def _sample_random_theta(self):
-        path = self.posesV0[np.random.random_integers(0, len(self.posesV0) - 1)]
-        with open(path, 'rb') as f:
-            # print path
-            stored_parameters = pickle.load(f)
-            thetas = stored_parameters['pose']
-            thetas[:3] = np.random.uniform(0, 2*np.pi, 1)
-
-        return np.asarray(thetas)
+        # The pose can be not natural, since the task is to predict shape.
+        return np.asarray(np.random.uniform(-2*np.pi, 2*np.pi, 72))
 
     # The inner function for batch generation
     def _get_batch(self, N, beta):
@@ -189,7 +178,7 @@ class Trainer(Trainable):
                 debug_display_cloud(predicted_verts[0], joints3d[0], verts[0], joints3d[0])
                 debug_display_joints(predicted_joints2d[0], joints2d[0])
                 print beta_loss
-                #print beta[0], ' == ', predicted_beta[0]
+
         return TrainingResult(timesteps_this_iter=1, mean_loss=beta_loss)
 
 
