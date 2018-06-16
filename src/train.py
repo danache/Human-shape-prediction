@@ -1,7 +1,10 @@
+import matplotlib.pyplot as plt
 import ray
 import ray.tune as tune
+from mpl_toolkits.mplot3d import Axes3D  # <-- Note the capitalization!
 from pylab import *
 from ray.tune import TrainingResult
+from ray.tune.pbt import PopulationBasedTraining
 from ray.tune.trainable import Trainable
 from torch.nn.modules.normalization import *
 
@@ -52,7 +55,7 @@ def debug_display_cloud(verts, joints, true_verts, true_joints):
     plt.clf()
 
     fig = plt.figure(1)
-    ax3d = fig.gca(projection='3d')
+    ax3d = Axes3D(fig)
     ax3d.clear()
     ax3d.set_aspect("equal")
     ax3d.set_xlim3d(-1, 1)
@@ -179,13 +182,14 @@ class Trainer(Trainable):
                 debug_display_joints(predicted_joints2d[0], joints2d[0])
                 print beta_loss
 
-        return TrainingResult(timesteps_this_iter=1, mean_loss=beta_loss)
+        return TrainingResult(timesteps_this_iter=1, mean_loss=float(beta_loss.cpu().detach().numpy()))
 
 
 if __name__ == "__main__":
     ray.init(num_workers=8, num_cpus=4, num_gpus=2, driver_mode=ray.SILENT_MODE)
     tune.register_trainable("train_model", Trainer)
     # which gpu to use
+    '''
     with torch.cuda.device(0):
         trainer = Trainer(config= {
             "lr":  0.01,
@@ -200,16 +204,15 @@ if __name__ == "__main__":
         # The main training loop
         while True:
             trainer._train()
-
-
+    '''
 
     # Hyper parameter optimization.
     # Currently we do not use it.
     # https://github.com/ray-project/ray/tree/master/python/ray/tune/examples
-    '''
+
     exp = tune.Experiment(
         name="measurements",
-        local_dir="/home/king/ray_results/",
+        local_dir="/home/sparky/ray_results/",
         run="train_model",
         repeat=32,
         checkpoint_freq=5,
@@ -217,12 +220,13 @@ if __name__ == "__main__":
         config={
             "lr": lambda spec: np.random.uniform(1e-6, 1e-2),
             "weight_decay": lambda spec: np.random.uniform(0, 0.2),
-            "batch_size": lambda spec: np.random.choice([16, 32, 64]),
-            "layers_num": lambda spec: np.random.choice([25, 50, 75]),
-            "k": lambda spec: int(np.random.uniform(16, 320)),
+            "num_blocks": lambda spec: 1,
+            "batch_size": lambda spec: np.random.choice([8, 16, 32]),
+            "num_layers": lambda spec: np.random.choice([500, 750, 1000]),
+            "k": lambda spec: int(np.random.uniform(1, 8)),
             'activation': lambda spec: np.random.choice(["relu", "tanh", "leaky_relu"]),
         },
-        trial_resources= {"cpu": 1, "gpu": 1})
+        trial_resources={"cpu": 1, "gpu": 1})
 
     pbt = PopulationBasedTraining(
         time_attr="timesteps_total",
@@ -231,18 +235,9 @@ if __name__ == "__main__":
         {
             "lr": lambda: np.random.uniform(1e-6, 1e-2),
             "weight_decay": lambda: np.random.uniform(0, 0.2),
-            "batch_size": lambda: int(np.random.uniform(16, 64)),
-            "layers_num": lambda: int(np.random.uniform(25, 75)),
-            "k": lambda: int(np.random.uniform(16, 320)),
+            "batch_size": lambda: int(np.random.uniform(1, 32)),
+            "num_layers": lambda: int(np.random.uniform(25, 1000)),
+            "k": lambda: int(np.random.uniform(1, 16)),
         })
 
     tune.run_experiments(exp, pbt)
-    '''
-
-
-
-
-
-
-
-
