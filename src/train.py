@@ -1,12 +1,11 @@
-import matplotlib.pyplot as plt
 import ray
 import ray.tune as tune
 from mpl_toolkits.mplot3d import Axes3D  # <-- Note the capitalization!
 from pylab import *
 from ray.tune import TrainingResult
-from ray.tune.pbt import PopulationBasedTraining
 from ray.tune.trainable import Trainable
 from torch.nn.modules.normalization import *
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 import pytorch_smpl.measure as measure
 from nets import DenseNet
@@ -80,6 +79,8 @@ class Trainer(Trainable):
         self.net.cuda()
         # optimizer setup
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.config["lr"], weight_decay=self.config["weight_decay"])
+        self.scheduler = ReduceLROnPlateau(self.optimizer, 'min', verbose=True)
+        self.min_loss = inf
 
     def _sample_random_theta(self):
         # The pose can be not natural, since the task is to predict shape.
@@ -112,8 +113,8 @@ class Trainer(Trainable):
 
         return joints2d, verts, joints3d, beta, theta, heights, volumes
 
-    def _save(self, checkpoint_dir):
-        file_path = checkpoint_dir + "/model_save"
+    def _save(self, checkpoint_dir, postfix=None):
+        file_path = checkpoint_dir + "/model_save" + postfix
         torch.save(self.net, file_path)
         return file_path
 
@@ -127,11 +128,11 @@ class Trainer(Trainable):
          print("save model at: ", saved_path)
 
 
-    def _train(self):
+    def get_training_samples(self):
         # 2) After the initialization has been done, we can start training the model
         # The training loop
         beta = 4 * torch.randn((self.batch_size, 10)).float().cuda()
-        num_of_pictures = 30
+        num_of_pictures = 60 * 5
 
         # Get the training samples
         inputs = []
@@ -148,12 +149,48 @@ class Trainer(Trainable):
 
             input_to_net = torch.cat((joints2d.view((self.batch_size, -1)), heights, volumes), 1)
             inputs.append(input_to_net)
-
         inputs = torch.stack(inputs, 2)
 
-        for i in range(1):
-            self.net.train()
+        '''
+                if float(np.random.random_sample()) > 0.0:
+            debug_display_cloud(predicted_verts[0], joints3d[0], verts[0], joints3d[0])
+            debug_display_joints(predicted_joints2d[0], joints2d[0])
+            print beta_loss
+        '''
+        return beta, inputs
 
+
+
+    def _eval(self):
+        total_loss = 0
+        num_iter = 25
+        for i in range(num_iter):
+            beta, inputs = self.get_training_samples()
+            # Evaluation ===============================================================================================
+            self.net.eval()
+            predicted_beta = self.net.forward(inputs)
+            beta_loss = torch.sum(torch.abs(torch.squeeze(predicted_beta) - torch.squeeze(beta))) / float(self.batch_size)
+            total_loss += float(beta_loss.cpu().detach().numpy())
+
+        total_loss = total_loss / float(num_iter)
+        self.scheduler.step(total_loss)
+
+        print 'Evaluation finished: ', total_loss
+
+        if self.min_loss > total_loss:
+            self.min_loss = total_loss
+            print 'Saving ...', ' the current loss is ', self.min_loss
+            trainer._save('/home/sparky/Documents/Projects/Human-Shape-Prediction/trained/', str(self.min_loss))
+
+
+
+    def _train(self):
+        total_loss = 0
+        num_iter = 25
+        for i in range(num_iter):
+            beta, inputs = self.get_training_samples()
+
+            self.net.train()
             # clean the gradients
             self.net.zero_grad()
             self.camera.zero_grad()
@@ -162,54 +199,40 @@ class Trainer(Trainable):
             # Prediction ===============================================================================================
             # predicted_theta, predicted_beta, predicted_camera_parameters = net.forward(joints2d)
             predicted_beta = self.net.forward(inputs)
-            beta_loss = torch.sum(torch.abs(torch.squeeze(predicted_beta) - torch.squeeze(beta))) / self.batch_size
+            beta_loss = torch.sum(torch.abs(torch.squeeze(predicted_beta) - torch.squeeze(beta))) / float(self.batch_size)
             beta_loss.backward()
             self.optimizer.step()
-
-
-            # Evaluation ===============================================================================================
-
-            self.net.eval()
-            predicted_beta = self.net.forward(inputs)
-            predicted_verts, predicted_joints3d, Rs = self.smpl.forward(predicted_beta, torch.zeros_like(theta), True)
-            verts, joints3d, Rs = self.smpl.forward(beta, torch.zeros_like(theta), True)
-
-            predicted_joints2d = self.camera.forward(predicted_joints3d)
-            beta_loss = torch.sum(torch.abs(torch.squeeze(predicted_beta) - torch.squeeze(beta))) / self.batch_size
-
-            if float(np.random.random_sample()) > 0.0:
-                debug_display_cloud(predicted_verts[0], joints3d[0], verts[0], joints3d[0])
-                debug_display_joints(predicted_joints2d[0], joints2d[0])
-                print beta_loss
-
-        return TrainingResult(timesteps_this_iter=1, mean_loss=float(beta_loss.cpu().detach().numpy()))
+            total_loss += float(beta_loss.cpu().detach().numpy())
+        total_loss = total_loss / float(num_iter)
+        return TrainingResult(timesteps_this_iter=1, mean_loss=total_loss)
 
 
 if __name__ == "__main__":
     ray.init(num_workers=8, num_cpus=4, num_gpus=2, driver_mode=ray.SILENT_MODE)
     tune.register_trainable("train_model", Trainer)
     # which gpu to use
-    '''
     with torch.cuda.device(0):
         trainer = Trainer(config= {
             "lr":  0.01,
             "weight_decay":  0.0,
             "batch_size":  32,
-            "num_layers":  1000,
-            "num_blocks": 1,
-            "k":  1,
+            "num_layers":  30,
+            "num_blocks": 8,
+            "k":  32,
             'activation':  "leaky_relu",
             })
 
         # The main training loop
         while True:
             trainer._train()
-    '''
+            trainer._eval()
+
+
 
     # Hyper parameter optimization.
     # Currently we do not use it.
     # https://github.com/ray-project/ray/tree/master/python/ray/tune/examples
-
+    '''
     exp = tune.Experiment(
         name="measurements",
         local_dir="/home/sparky/ray_results/",
@@ -241,3 +264,4 @@ if __name__ == "__main__":
         })
 
     tune.run_experiments(exp, pbt)
+    '''
