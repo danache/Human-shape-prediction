@@ -19,7 +19,7 @@ class Camera(nn.Module):
     def _init_camera_randomly(self, batch_size):
         self.tx = Parameter(torch.from_numpy(np.asarray(np.zeros((batch_size, 1, 1))))).float().cuda() + 9
         self.ty = Parameter(torch.from_numpy(np.asarray(np.zeros((batch_size, 1, 1))))).float().cuda() + 9
-        self.tz = Parameter(torch.from_numpy(np.asarray(np.random.uniform(5, 5, (batch_size, 1, 1))))).float().cuda()
+        self.tz = Parameter(torch.from_numpy(np.asarray(np.random.uniform(1, 10, (batch_size, 1, 1))))).float().cuda()
         self.camera_parameters = torch.squeeze(torch.cat([self.tx, self.ty, self.tz], 1))
 
 
@@ -27,9 +27,9 @@ class Camera(nn.Module):
         t = torch.cat([self.tx, self.ty, self.tz], 2)
         joints = joints + t.float().cuda()
 
-        x = joints[:,:,0]
-        y = joints[:,:,1]
-        z = joints[:,:,2]
+        x = joints[:, :, 0]
+        y = joints[:, :, 1]
+        z = joints[:, :, 2]
 
         u = (x / (z + 1e-8))
         v = (y / (z + 1e-8))
