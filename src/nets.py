@@ -63,10 +63,10 @@ class TransitionLayer(nn.Module):
 
     def __init__(self, input_features):
         super(TransitionLayer, self).__init__()
-        self.bn1 = nn.BatchNorm1d(input_features)
-        self.conv1 = nn.Conv1d(input_features, int(input_features * 0.5), kernel_size=1)
-        self.pool1 = nn.AvgPool1d(2, stride=2, padding=1)
         self.output_features = int(input_features * 0.5)
+        self.bn1 = nn.BatchNorm1d(input_features)
+        self.conv1 = nn.Conv1d(input_features, self.output_features, kernel_size=1)
+        self.pool1 = nn.AvgPool1d(2, stride=2)
 
     def forward(self, x):
         x = self.bn1(x)
@@ -78,12 +78,10 @@ class EntranceLayer(nn.Module):
 
     def __init__(self, k0):
         super(EntranceLayer, self).__init__()
-        self.conv1 = nn.Conv1d(40, k0, kernel_size=7, stride=2, padding=3)
-        self.pool1 = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
+        self.conv1 = nn.Conv1d(40, k0, kernel_size=7, stride=2)
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.pool1(x)
         return x
 
 
