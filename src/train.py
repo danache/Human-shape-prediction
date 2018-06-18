@@ -75,6 +75,7 @@ class Trainer(Trainable):
         self.smpl = SMPL('/home/sparky/Documents/Projects/Human-Shape-Prediction/models/neutral_smpl_with_cocoplus_reg.pkl')
         self.camera = Camera()
         self.batch_size = int(self.config["batch_size"])
+        self.num_sets = 60
         self.net = DenseNet(self.config)
         self.net.cuda()
         # optimizer setup
@@ -87,15 +88,24 @@ class Trainer(Trainable):
         return np.asarray(np.random.uniform(-2*np.pi, 2*np.pi, 72))
 
     # The inner function for batch generation
-    def _get_batch(self, N, beta):
-        theta = np.ones((N, 72)) * np.expand_dims(self._sample_random_theta(), 0)
-        theta = torch.from_numpy(theta).float().cuda()
+    def _get_batch(self):
+        original_beta = 4 * torch.randn((1, self.batch_size, 10)).float().cuda()
+        beta = original_beta.expand((self.num_sets, self.batch_size, 10))
+        beta = beta.contiguous().view(self.num_sets * self.batch_size, 10)
+        # Check betas
+        check_beta = beta.contiguous().view(self.num_sets, self.batch_size, 10).cpu().numpy()
+        assert (check_beta[0, :, :] == check_beta[1, :, :]).all()
+
+        theta = torch.rand((self.batch_size * self.num_sets, 72)).float().cuda() * np.random.choice([-2*np.pi, 2*np.pi])
+        theta = theta.float().cuda()
+
         # Without pose but with shape for measuring
         verts, joints3d, Rs = self.smpl.forward(beta, theta, True)
         heights = measure.compute_height(verts)
         volumes = measure.compute_volume(verts, self.smpl.f)
-        self.camera._init_camera_randomly(N)
-        joints2d = self.camera.forward(joints3d)
+
+        joints3d = joints3d.view(self.num_sets, self.batch_size, 19, 3)
+        joints2d = self.camera.forward(joints3d, self.batch_size)
 
         # Must add artificial noise to the joints since joints detection algorithms are not perfect
         # -+ 2 cm
@@ -111,7 +121,19 @@ class Trainer(Trainable):
         noise = torch.normal(torch.zeros_like(volumes), volumes / 80.0).float().cuda()
         volumes += noise
 
-        return joints2d, verts, joints3d, beta, theta, heights, volumes
+
+        heights = torch.unsqueeze(heights, -1)
+        volumes = torch.unsqueeze(volumes, -1)
+
+        joints2d = joints2d.view(60, self.batch_size, -1)
+        heights = heights.view(60, self.batch_size, -1)
+        volumes = volumes.view(60, self.batch_size, -1)
+
+        input_to_net = torch.cat((joints2d, heights, volumes), 2)
+        input_to_net = input_to_net.transpose(0, 2)
+        input_to_net = input_to_net.transpose(0, 1)
+
+        return input_to_net.detach(), torch.squeeze(original_beta).detach()
 
     def _save(self, checkpoint_dir, postfix=None):
         file_path = checkpoint_dir + "/model_save" + postfix
@@ -128,48 +150,15 @@ class Trainer(Trainable):
          print("save model at: ", saved_path)
 
 
-    def get_training_samples(self):
-        # 2) After the initialization has been done, we can start training the model
-        # The training loop
-        beta = 4 * torch.randn((self.batch_size, 10)).float().cuda()
-        num_of_pictures = 60 * 5
-
-        # Get the training samples
-        inputs = []
-        for i in range(num_of_pictures):
-            joints2d, verts, joints3d, beta, theta, heights, volumes = self._get_batch(
-                self.batch_size, beta)
-
-            heights = torch.unsqueeze(heights, -1)
-            volumes = torch.unsqueeze(volumes, -1)
-
-            joints2d = joints2d.detach()
-            volumes = volumes.detach()
-            heights = heights.detach()
-
-            input_to_net = torch.cat((joints2d.view((self.batch_size, -1)), heights, volumes), 1)
-            inputs.append(input_to_net)
-        inputs = torch.stack(inputs, 2)
-
-        '''
-                if float(np.random.random_sample()) > 0.0:
-            debug_display_cloud(predicted_verts[0], joints3d[0], verts[0], joints3d[0])
-            debug_display_joints(predicted_joints2d[0], joints2d[0])
-            print beta_loss
-        '''
-        return beta, inputs
-
-
-
     def _eval(self):
         total_loss = 0
-        num_iter = 25
+        num_iter = 250
         for i in range(num_iter):
-            beta, inputs = self.get_training_samples()
+            inputs, beta = self._get_batch()
             # Evaluation ===============================================================================================
             self.net.eval()
             predicted_beta = self.net.forward(inputs)
-            beta_loss = torch.sum(torch.abs(torch.squeeze(predicted_beta) - torch.squeeze(beta))) / float(self.batch_size)
+            beta_loss = F.mse_loss(predicted_beta, beta)
             total_loss += float(beta_loss.cpu().detach().numpy())
 
         total_loss = total_loss / float(num_iter)
@@ -186,9 +175,9 @@ class Trainer(Trainable):
 
     def _train(self):
         total_loss = 0
-        num_iter = 25
+        num_iter = 250
         for i in range(num_iter):
-            beta, inputs = self.get_training_samples()
+            inputs, beta = self._get_batch()
 
             self.net.train()
             # clean the gradients
@@ -199,10 +188,13 @@ class Trainer(Trainable):
             # Prediction ===============================================================================================
             # predicted_theta, predicted_beta, predicted_camera_parameters = net.forward(joints2d)
             predicted_beta = self.net.forward(inputs)
-            beta_loss = torch.sum(torch.abs(torch.squeeze(predicted_beta) - torch.squeeze(beta))) / float(self.batch_size)
+            beta_loss = F.mse_loss(predicted_beta, beta)
             beta_loss.backward()
             self.optimizer.step()
             total_loss += float(beta_loss.cpu().detach().numpy())
+
+            print i,
+
         total_loss = total_loss / float(num_iter)
         return TrainingResult(timesteps_this_iter=1, mean_loss=total_loss)
 
@@ -217,7 +209,7 @@ if __name__ == "__main__":
             "weight_decay":  0.0,
             "batch_size":  32,
             "num_layers":  30,
-            "num_blocks": 8,
+            "num_blocks": 3,
             "k":  32,
             'activation':  "leaky_relu",
             })
