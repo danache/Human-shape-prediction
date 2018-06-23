@@ -38,7 +38,7 @@ def debug_display_joints(joints2d, true_joints2d):
     plt.pause(1e-6)
 
 
-def debug_display_cloud(verts, joints, true_verts, true_joints):
+def debug_display_cloud(verts, joints, true_verts, true_joints, min_loss):
     verts = verts.cpu().detach().numpy()
     verts = np.squeeze(verts)
 
@@ -66,6 +66,7 @@ def debug_display_cloud(verts, joints, true_verts, true_joints):
     ax3d.plot(true_joints[:,0], true_joints[:,1], true_joints[:,2], 'go')
     plt.draw()
     plt.pause(1e-6)
+    plt.savefig(str(min_loss) + ".png")
 
 # http://ray.readthedocs.io/en/latest/tune.html
 class Trainer(Trainable):
@@ -75,13 +76,13 @@ class Trainer(Trainable):
         self.smpl = SMPL('/home/sparky/Documents/Projects/Human-Shape-Prediction/models/neutral_smpl_with_cocoplus_reg.pkl')
         self.camera = Camera()
         self.batch_size = int(self.config["batch_size"])
-        self.num_sets = 60
         self.net = DenseNet(self.config)
         self.net.cuda()
         # optimizer setup
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.config["lr"], weight_decay=self.config["weight_decay"])
         self.scheduler = ReduceLROnPlateau(self.optimizer, 'min', verbose=True)
         self.min_loss = inf
+        self.num_iter = 5000
 
     def _sample_random_theta(self):
         # The pose can be not natural, since the task is to predict shape.
@@ -89,28 +90,21 @@ class Trainer(Trainable):
 
     # The inner function for batch generation
     def _get_batch(self):
-        original_beta = 4 * torch.randn((1, self.batch_size, 10)).float().cuda()
-        beta = original_beta.expand((self.num_sets, self.batch_size, 10))
-        beta = beta.contiguous().view(self.num_sets * self.batch_size, 10)
-        # Check betas
-        check_beta = beta.contiguous().view(self.num_sets, self.batch_size, 10).cpu().numpy()
-        assert (check_beta[0, :, :] == check_beta[1, :, :]).all()
-
-        theta = torch.rand((self.batch_size * self.num_sets, 72)).float().cuda() * np.random.choice([-2*np.pi, 2*np.pi])
-        theta = theta.float().cuda()
+        beta = 4 * torch.randn((self.batch_size, 10)).float().cuda()
+        theta = torch.zeros((self.batch_size, 72)).float().cuda()
 
         # Without pose but with shape for measuring
         verts, joints3d, Rs = self.smpl.forward(beta, theta, True)
         heights = measure.compute_height(verts)
         volumes = measure.compute_volume(verts, self.smpl.f)
 
-        joints3d = joints3d.view(self.num_sets, self.batch_size, 19, 3)
-        joints2d = self.camera.forward(joints3d, self.batch_size)
 
         # Must add artificial noise to the joints since joints detection algorithms are not perfect
         # -+ 2 cm
-        noise = torch.normal(torch.zeros_like(joints2d), 0.01).float().cuda()
-        joints2d += noise
+        noise = torch.normal(torch.zeros_like(joints3d), 0.01).float().cuda()
+        joints3d += noise
+        scale = torch.rand((self.batch_size, 1, 1)) * 1.5 + 0.5
+        joints3d /= scale.float().cuda()
 
         # Must add artificial noise to the height and volume.
         # Volume must represent a weight of a person, so -+ 3 kg
@@ -121,19 +115,12 @@ class Trainer(Trainable):
         noise = torch.normal(torch.zeros_like(volumes), volumes / 80.0).float().cuda()
         volumes += noise
 
-
+        joints3d = joints3d.view(self.batch_size, -1)
         heights = torch.unsqueeze(heights, -1)
         volumes = torch.unsqueeze(volumes, -1)
 
-        joints2d = joints2d.view(60, self.batch_size, -1)
-        heights = heights.view(60, self.batch_size, -1)
-        volumes = volumes.view(60, self.batch_size, -1)
-
-        input_to_net = torch.cat((joints2d, heights, volumes), 2)
-        input_to_net = input_to_net.transpose(0, 2)
-        input_to_net = input_to_net.transpose(0, 1)
-
-        return input_to_net.detach(), torch.squeeze(original_beta).detach()
+        input_to_net = torch.cat((joints3d, heights, volumes), 1)
+        return input_to_net.detach(), torch.squeeze(beta).detach()
 
     def _save(self, checkpoint_dir, postfix=None):
         file_path = checkpoint_dir + "/model_save" + postfix
@@ -152,8 +139,7 @@ class Trainer(Trainable):
 
     def _eval(self):
         total_loss = 0
-        num_iter = 250
-        for i in range(num_iter):
+        for i in range(self.num_iter):
             inputs, beta = self._get_batch()
             # Evaluation ===============================================================================================
             self.net.eval()
@@ -161,22 +147,25 @@ class Trainer(Trainable):
             beta_loss = F.mse_loss(predicted_beta, beta)
             total_loss += float(beta_loss.cpu().detach().numpy())
 
-        total_loss = total_loss / float(num_iter)
+        total_loss = total_loss / float(self.num_iter)
         self.scheduler.step(total_loss)
 
-        print 'Evaluation finished: ', total_loss
+        print '\n Evaluation finished: ', total_loss
 
         if self.min_loss > total_loss:
             self.min_loss = total_loss
             print 'Saving ...', ' the current loss is ', self.min_loss
             trainer._save('/home/sparky/Documents/Projects/Human-Shape-Prediction/trained/', str(self.min_loss))
 
+            theta = torch.zeros((self.batch_size, 72)).cuda()
+            verts, joints3d, Rs = self.smpl.forward(beta, theta, True)
+            predicted_verts, predicted_joints3d, Rs = self.smpl.forward(predicted_beta, theta, True)
+            debug_display_cloud(verts[0], joints3d[0], predicted_verts[0], predicted_joints3d[0], self.min_loss)
 
 
     def _train(self):
         total_loss = 0
-        num_iter = 250
-        for i in range(num_iter):
+        for i in range(self.num_iter):
             inputs, beta = self._get_batch()
 
             self.net.train()
@@ -193,9 +182,13 @@ class Trainer(Trainable):
             self.optimizer.step()
             total_loss += float(beta_loss.cpu().detach().numpy())
 
-            print i,
+          #  debug_display_cloud
 
-        total_loss = total_loss / float(num_iter)
+
+            if i % 100 == True:
+                print i,
+
+        total_loss = total_loss / float(self.num_iter)
         return TrainingResult(timesteps_this_iter=1, mean_loss=total_loss)
 
 
@@ -205,12 +198,12 @@ if __name__ == "__main__":
     # which gpu to use
     with torch.cuda.device(0):
         trainer = Trainer(config= {
-            "lr":  0.01,
+            "lr":  0.001,
             "weight_decay":  0.0,
             "batch_size":  32,
             "num_layers":  30,
             "num_blocks": 3,
-            "k":  32,
+            "k":  1,
             'activation':  "leaky_relu",
             })
 
