@@ -65,17 +65,19 @@ def debug_display_cloud(verts, joints, true_verts, true_joints, min_loss=0, save
     ax3d.plot(true_verts[:,0], true_verts[:,1], true_verts[:,2], 'g,')
     ax3d.plot(true_joints[:,0], true_joints[:,1], true_joints[:,2], 'go')
     plt.draw()
-    plt.show()
+
     if save:
         plt.pause(1e-6)
         plt.savefig(str(min_loss) + ".png")
+    else:
+        plt.show()
 
 # http://ray.readthedocs.io/en/latest/tune.html
 class Trainer(Trainable):
 
     def _setup(self):
         # 1) Initialize all needed parameters
-        self.smpl = SMPL('/home/sparky/Documents/Projects/Human-Shape-Prediction/models/neutral_smpl_with_cocoplus_reg.pkl')
+        self.smpl = SMPL('../models/neutral_smpl_with_cocoplus_reg.pkl')
         self.camera = Camera()
         self.batch_size = int(self.config["batch_size"])
         self.net = DenseNet(self.config)
@@ -105,7 +107,7 @@ class Trainer(Trainable):
         # -+ 2 cm
         noise = torch.normal(torch.zeros_like(joints3d), 0.01).float().cuda()
         joints3d += noise
-        scale = torch.rand((self.batch_size, 1, 1)) * 1.5 + 0.5
+        scale = torch.rand((self.batch_size, 1, 1)) * 3.75 + 0.25
         joints3d /= scale.float().cuda()
 
         # Must add artificial noise to the height and volume.
@@ -114,7 +116,7 @@ class Trainer(Trainable):
         noise = torch.normal(torch.zeros_like(heights), 0.03).float().cuda()
         heights += noise
 
-        noise = torch.normal(torch.zeros_like(volumes), volumes / 80.0).float().cuda()
+        noise = torch.normal(torch.zeros_like(volumes), volumes / 100.0).float().cuda()
         volumes += noise
 
         joints3d = joints3d.view(self.batch_size, -1)
@@ -125,7 +127,7 @@ class Trainer(Trainable):
         return input_to_net.detach(), torch.squeeze(beta).detach()
 
     def _save(self, checkpoint_dir, postfix=None):
-        file_path = checkpoint_dir + "/model_save" + postfix
+        file_path = checkpoint_dir + "/model_save_new" + postfix
         torch.save(self.net, file_path)
         return file_path
 
@@ -157,12 +159,12 @@ class Trainer(Trainable):
         if self.min_loss > total_loss:
             self.min_loss = total_loss
             print 'Saving ...', ' the current loss is ', self.min_loss
-            trainer._save('/home/sparky/Documents/Projects/Human-Shape-Prediction/trained/', str(self.min_loss))
+            trainer._save('../trained/', str(self.min_loss))
 
             theta = torch.zeros((self.batch_size, 72)).cuda()
             verts, joints3d, Rs = self.smpl.forward(beta, theta, True)
             predicted_verts, predicted_joints3d, Rs = self.smpl.forward(predicted_beta, theta, True)
-            debug_display_cloud(verts[0], joints3d[0], predicted_verts[0], predicted_joints3d[0], self.min_loss)
+            debug_display_cloud(verts[0], joints3d[0], predicted_verts[0], predicted_joints3d[0], self.min_loss, True)
 
 
     def _train(self):
