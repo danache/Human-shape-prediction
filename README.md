@@ -2,7 +2,7 @@
 A dense deep neural network for human shape prediction from provided height, weight and approximate 3d keypoints locations.
 
 1) The 3d keypoints locations are initially predicted by using https://github.com/glinsun/hmr.
-2) The human-shape-prediciton net (HSPN) takes the approximate 3d keypoints locations, weight and height, and it will predict shape parametes so that the relative positions of 3d keypoints are still the same, but the weight and the height will correspond to the provided weight and height.
+2) The human-shape-prediciton net (HSPN) takes the approximate 3d keypoints locations, weight and height, and it predicts the shape parametes so that the relative positions of 3d keypoints are still the same, but the weight and the height correspond to the provided weight and height.
 
 ### Demo
 
