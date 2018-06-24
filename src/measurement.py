@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from numpy import *
 from scipy import interpolate
+import numpy as np
 
 VIZ = False
 
@@ -126,7 +127,7 @@ def measure_part_open(mesh, vertex_array, name = 'NOT SPECIFIED', pk = 2,  VIZ =
         ax3d.plot(X, Y, Z, 'r')
         ax3d.plot(X_knots, Y_knots, Z_knots, 'go')
         ax3d.plot(X_fine, Y_fine, Z_fine)
-        f.show()
+        plt.show(True)
         print "The measurement of ", name, " has been completed: "
         print "Interpolated distance = ", curve_length(X_fine, Y_fine, Z_fine)
         print "Raw distance = ", curve_length(X, Y, Z)
@@ -332,6 +333,8 @@ def measure_part_closed(mesh, vertex_array, VIZ = False, name = 'NOT SPECIFIED')
         ax.grid()
         f2.show()
 
+        plt.show()
+
         print "The measurement of ", name, " has been completed: "
         print "Ellipse distance = ",  curve_length(xee2, yee2, np.linspace(0, 0, len(xee2)))
         print "Raw distance = ", curve_length(Xdata, Ydata, Zdata)    # The intersection
@@ -345,9 +348,11 @@ def get_height(verts):
     max = np.max(np.abs(verts[411] - verts[3464]), axis=0)
     return max
 
-import keypoints
 
-def output_measurements(verts, VIZ=True, out=''):
+
+def output_measurements(verts, VIZ=False, out=''):
+    verts = np.squeeze(verts)
+    import keypoints
     # measure
     mheightl = get_height(verts)
     mshoulderl = measure_part_open(verts, keypoints.ShoulderWidth, pk=2, VIZ=VIZ)

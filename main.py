@@ -130,6 +130,100 @@ def preprocess_image(img_path, json_path=None):
     return crop, proc_param, img
 
 
+
+
+def preprocess_image_V2(img):
+    if img.shape[2] == 4:
+        img = img[:, :, :3]
+
+
+    if np.max(img.shape[:2]) != config.img_size:
+        print('Resizing so the max image size is %d..' % config.img_size)
+        scale = (float(config.img_size) / np.max(img.shape[:2]))
+    else:
+        scale = 1.
+    center = np.round(np.array(img.shape[:2]) / 2).astype(int)
+    # image center in (x,y)
+    center = center[::-1]
+
+
+    crop, proc_param = img_util.scale_and_crop(img, scale, center,
+                                               config.img_size)
+
+    # Normalize image to [-1, 1]
+    crop = 2 * ((crop / 255.) - 0.5)
+
+    return crop, proc_param, img
+
+
+def predict(image, weight, height):
+    global config, renderer
+
+
+    config = flags.FLAGS
+    config(sys.argv)
+    # Using pre-trained model, change this to use your own.
+    config.load_path = src.config.PRETRAINED_MODEL
+    config.batch_size = 1
+    renderer = vis_util.SMPLRenderer(face_path=config.smpl_face_path)
+
+
+    tf.reset_default_graph()
+    sess = tf.Session()
+    model = RunModel(config, sess=sess)
+
+    input_img, proc_param, img = preprocess_image_V2(image)
+    # Add batch dimension: 1 x D x D x 3
+    input_img = np.expand_dims(input_img, 0)
+
+    joints, verts, cams, joints3d, theta = model.predict(
+        input_img, get_theta=True)
+    sess.close()
+
+    cams = theta[:, :model.num_cam]
+    poses = theta[:, model.num_cam:(model.num_cam + model.num_theta)]
+    shapes = theta[:, (model.num_cam + model.num_theta):]
+
+
+  #  visualize(img, proc_param, joints[0], verts[0], cams[0])
+
+    '''
+    Start adjusting the shape
+    '''
+    shape_adjuster = torch.load("./trained/model_save1.57873062595")
+    smpl = SMPL("./models/neutral_smpl_with_cocoplus_reg.pkl")
+
+    beta = torch.from_numpy(shapes).float().cuda()
+    theta = torch.zeros((1, 72)).float().cuda()
+    heights = torch.from_numpy(np.asarray([height]))
+    volume = torch.from_numpy(np.asarray([weight]))
+
+    verts, joints3d, Rs = smpl.forward(beta, theta, True)
+    flatten_joints3d = joints3d.view(1, -1)
+    heights = torch.unsqueeze(heights, -1).float().cuda()
+    volumes = torch.unsqueeze(volume, -1).float().cuda()
+    input_to_net = torch.cat((flatten_joints3d, heights, volumes), 1)
+
+    adjusted_betas = shape_adjuster.forward(input_to_net)
+
+    adjusted_verts, adjusted_joints3d, Rs = smpl.forward(adjusted_betas, theta, True)
+    adjusted_heights = measure.compute_height(adjusted_verts)
+    adjusted_volumes = measure.compute_volume(adjusted_verts, smpl.f)
+
+    print (adjusted_heights, adjusted_volumes)
+
+  #  debug_display_cloud(verts[0], joints3d[0], adjusted_verts[0], adjusted_joints3d[0])
+
+    # Change the posture for measurement
+    from measurement import POSE1
+    theta = torch.from_numpy(np.expand_dims(POSE1, 0)).float().cuda()
+    adjusted_verts, adjusted_joints3d, Rs = smpl.forward(adjusted_betas, theta, True)
+    return torch.squeeze(adjusted_verts).detach().cpu().numpy(), \
+           torch.squeeze(adjusted_volumes).detach().cpu().numpy(),\
+           torch.squeeze(adjusted_heights).detach().cpu().numpy(),
+
+
+
 def main(img_path, json_path=None):
     sess = tf.Session()
     model = RunModel(config, sess=sess)
@@ -175,9 +269,6 @@ def main(img_path, json_path=None):
 
     debug_display_cloud(verts[0], joints3d[0], adjusted_verts[0], adjusted_joints3d[0])
 
-
-
-    print ("here")
 
 
 
