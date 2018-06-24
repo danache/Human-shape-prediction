@@ -38,7 +38,7 @@ def debug_display_joints(joints2d, true_joints2d):
     plt.pause(1e-6)
 
 
-def debug_display_cloud(verts, joints, true_verts, true_joints, min_loss):
+def debug_display_cloud(verts, joints, true_verts, true_joints, min_loss=0, save=False):
     verts = verts.cpu().detach().numpy()
     verts = np.squeeze(verts)
 
@@ -65,8 +65,10 @@ def debug_display_cloud(verts, joints, true_verts, true_joints, min_loss):
     ax3d.plot(true_verts[:,0], true_verts[:,1], true_verts[:,2], 'g,')
     ax3d.plot(true_joints[:,0], true_joints[:,1], true_joints[:,2], 'go')
     plt.draw()
-    plt.pause(1e-6)
-    plt.savefig(str(min_loss) + ".png")
+    plt.show()
+    if save:
+        plt.pause(1e-6)
+        plt.savefig(str(min_loss) + ".png")
 
 # http://ray.readthedocs.io/en/latest/tune.html
 class Trainer(Trainable):
