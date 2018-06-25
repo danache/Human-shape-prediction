@@ -10,9 +10,9 @@ class MeasurementCore(object):
 
     def predict(self, pickled_picture, weight, height):
         picture = pickle.loads(pickled_picture)
-        verts, adjusted_weight, adjusted_height = main.predict(picture, weight, height)
-        measurements = output_measurements(verts)
-        return pickle.dumps((measurements, verts, adjusted_weight, adjusted_height), protocol=0)
+        viz_image, hmr_verts, adjusted_verts, m_adjusted_verts, adjusted_weight, adjusted_height = main.predict(picture, weight, height)
+        measurements = output_measurements(m_adjusted_verts)
+        return pickle.dumps((measurements, viz_image, hmr_verts, adjusted_verts, adjusted_weight, adjusted_height), protocol=0)
 
 
 if __name__ == "__main__":

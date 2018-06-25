@@ -11,7 +11,7 @@ import pytorch_smpl.measure as measure
 from nets import DenseNet
 from pytorch_camera.camera import Camera
 from pytorch_smpl.smpl import SMPL
-
+from scipy import misc
 '''
 2 experiments must be done
 

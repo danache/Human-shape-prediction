@@ -45,7 +45,7 @@ from pytorch_smpl.smpl import SMPL
 import pytorch_smpl.measure as measure
 from train import debug_display_cloud
 
-
+from scipy import misc
 flags.DEFINE_string('img_path', 'data/im1963.jpg', 'Image to run')
 flags.DEFINE_string(
     'json_path', None,
@@ -99,7 +99,11 @@ def visualize(img, proc_param, joints, verts, cam):
     plt.title('diff vp')
     plt.axis('off')
     plt.draw()
-    plt.show()
+    #plt.show()
+    plt.savefig('result.png')
+
+    return misc.imread('result.png')
+
     # import ipdb
     # ipdb.set_trace()
 
@@ -185,7 +189,7 @@ def predict(image, weight, height):
     shapes = theta[:, (model.num_cam + model.num_theta):]
 
 
-  #  visualize(img, proc_param, joints[0], verts[0], cams[0])
+    viz_result = visualize(img, proc_param, joints[0], verts[0], cams[0])
 
     '''
     Start adjusting the shape
@@ -217,8 +221,11 @@ def predict(image, weight, height):
     # Change the posture for measurement
     from measurement import POSE1
     theta = torch.from_numpy(np.expand_dims(POSE1, 0)).float().cuda()
-    adjusted_verts, adjusted_joints3d, Rs = smpl.forward(adjusted_betas, theta, True)
-    return torch.squeeze(adjusted_verts).detach().cpu().numpy(), \
+    m_adjusted_verts, adjusted_joints3d, Rs = smpl.forward(adjusted_betas, theta, True)
+    return viz_result, \
+           torch.squeeze(verts).detach().cpu().numpy(), \
+           torch.squeeze(adjusted_verts).detach().cpu().numpy(), \
+           torch.squeeze(m_adjusted_verts).detach().cpu().numpy(), \
            torch.squeeze(adjusted_volumes).detach().cpu().numpy(),\
            torch.squeeze(adjusted_heights).detach().cpu().numpy(),
 
