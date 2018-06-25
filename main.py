@@ -190,7 +190,7 @@ def predict(image, weight, height):
     '''
     Start adjusting the shape
     '''
-    shape_adjuster = torch.load("./trained/model_save1.57873062595")
+    shape_adjuster = torch.load("./trained/model_release_1.5961363467")
     smpl = SMPL("./models/neutral_smpl_with_cocoplus_reg.pkl")
 
     beta = torch.from_numpy(shapes).float().cuda()

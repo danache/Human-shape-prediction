@@ -21,21 +21,30 @@ from pytorch_smpl.smpl import SMPL
 '''
 
 
-def debug_display_joints(joints2d, true_joints2d):
-    joints2d = joints2d.view(2, -1).cpu().detach().numpy()
-    joints2d = np.squeeze(joints2d)
+def debug_display_joints(joints3d, noisy_joints2d):
+    joints3d = joints3d.cpu().detach().numpy()
+    joints3d = np.squeeze(joints3d)
 
-    true_joints2d = true_joints2d.view(2, -1).cpu().detach().numpy()
-    true_joints2d = np.squeeze(true_joints2d)
+    noisy_joints2d = noisy_joints2d.cpu().detach().numpy()
+    noisy_joints2d = np.squeeze(noisy_joints2d)
 
 
-    plt.figure(2)
+
     plt.clf()
-    plt.plot(joints2d[0,:], joints2d[1,:], 'ko')
-    plt.plot(true_joints2d[0,:], true_joints2d[1,:], 'go')
-    plt.gca().set_aspect('equal', adjustable='box')
+
+    fig = plt.figure(1)
+    ax3d = Axes3D(fig)
+    ax3d.clear()
+    ax3d.set_aspect("equal")
+    ax3d.set_xlim3d(-1, 1)
+    ax3d.set_ylim3d(-1, 1)
+    ax3d.set_zlim3d(-1, 1)
+    ax3d.plot(joints3d[:,0], joints3d[:,1], joints3d[:,2], 'go')
+    ax3d.plot(noisy_joints2d[:,0], noisy_joints2d[:,1], noisy_joints2d[:,2], 'ko')
+
     plt.draw()
-    plt.pause(1e-6)
+    plt.show()
+
 
 
 def debug_display_cloud(verts, joints, true_verts, true_joints, min_loss=0, save=False):
@@ -94,7 +103,7 @@ class Trainer(Trainable):
 
     # The inner function for batch generation
     def _get_batch(self):
-        beta = 4 * torch.randn((self.batch_size, 10)).float().cuda()
+        beta = 3 * torch.randn((self.batch_size, 10)).float().cuda()
         theta = torch.zeros((self.batch_size, 72)).float().cuda()
 
         # Without pose but with shape for measuring
@@ -105,10 +114,14 @@ class Trainer(Trainable):
 
         # Must add artificial noise to the joints since joints detection algorithms are not perfect
         # -+ 2 cm
-        noise = torch.normal(torch.zeros_like(joints3d), 0.01).float().cuda()
-        joints3d += noise
+        noise = torch.normal(torch.zeros_like(joints3d), 0.04).float().cuda()
+        noisy_joints3d = joints3d + noise
+
+        # Visualize noisy joints
+        #debug_display_joints(noisy_joints3d[0], joints3d[0])
+
         scale = torch.rand((self.batch_size, 1, 1)) * 3.75 + 0.25
-        joints3d /= scale.float().cuda()
+        noisy_joints3d /= scale.float().cuda()
 
         # Must add artificial noise to the height and volume.
         # Volume must represent a weight of a person, so -+ 3 kg
@@ -119,11 +132,11 @@ class Trainer(Trainable):
         noise = torch.normal(torch.zeros_like(volumes), volumes / 100.0).float().cuda()
         volumes += noise
 
-        joints3d = joints3d.view(self.batch_size, -1)
+        noisy_joints3d = noisy_joints3d.view(self.batch_size, -1)
         heights = torch.unsqueeze(heights, -1)
         volumes = torch.unsqueeze(volumes, -1)
 
-        input_to_net = torch.cat((joints3d, heights, volumes), 1)
+        input_to_net = torch.cat((noisy_joints3d, heights, volumes), 1)
         return input_to_net.detach(), torch.squeeze(beta).detach()
 
     def _save(self, checkpoint_dir, postfix=None):
